@@ -25,10 +25,10 @@ Documentation describes frame 0 as the sync frame, 1-20 as system code, and 21-2
 10101010001010100110 010
 AA2A6 2
 '''
-import binascii, bitstring, sys, getopt, rflib, time
+import binascii, bitstring, sys, getopt, rflib, time, random
 
 #Help
-help_msg = '\nLinear Technologies MegaCode RfCat transmitter.\n\nUse this to transmit a single remote ID or iterate through a range.\nIDs are 20 bits and are provided as an integer between 1 and 1048575.\n    -s, --systemid    <integer between 1-1048575>\n    -l, --lower       <lower end of range>\n    -u, --upper       <upper end of range>\n\n'
+help_msg = '\nLinear Technologies MegaCode RfCat transmitter.\n\nUse this to transmit a single remote ID or iterate through a range.\nIDs are 20 bits and are provided as an integer between 1 and 1048575.\n    -s, --systemid    <integer between 1-1048575>\n    -l, --lower       <lower end of range>\n    -u, --upper       <upper end of range>\n    -r, --reduced     Attempts to randomly guess a key in the reduced 14 bit keyspace based on research from King Kevin at www.cuvoodoo.info\n\n'
 
 #Radio stuff
 frequency = 318000000
@@ -54,12 +54,13 @@ def PadBytes(byte_length, hex_val):
         padded_hex_val = hex_val
         return padded_hex_val
     if pad_num < 0:
+        print(str(hex_val))
         print('Invalid length of input, was expecting <= ' + str(byte_length) + ' but we got ' + str(len(hex_val)) + ' instead!')
         print(help_msg)
         quit()
 
-def PacketValues(sysid):
-    input_hex = PadBytes(6, str(hex(sysid)).lstrip("0x"))    
+def PacketValues(sysid, PacketLen):
+    input_hex = PadBytes(PacketLen, str(hex(sysid)).lstrip("0x"))    
     return input_hex
 
 def ValidateInput_sysid_single(sysid):
@@ -113,10 +114,10 @@ def FormatBitFrame(input_bin):
             print("lolwut?")
     return output_bin
 
-def TransmitData(output_bin, input_hex, d):
-    sync_frame = "000001"
-    data_frame = "001000000001001000" #value = 2
-    null_tail  = "000000"
+def TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail):
+    #sync_frame = "000001"
+    #data_frame = "001000000001001000" #value = 2
+    #null_tail  = "000000"
     rf_data = bitstring.BitArray(bin=sync_frame+output_bin+data_frame+null_tail).tobytes()
     keyLen = len(rf_data)
     #Transmit here.
@@ -133,11 +134,12 @@ def main(argv):
     sysid_upper = False
     sysid_range = False
     sysid_single = False
+    reduced_keyspace = False
     input_hex = ''
     output_hex = ''
     
     try:
-        opts, args = getopt.getopt(argv,"hl:u:s:",["lower=","upper=","systemid"])
+        opts, args = getopt.getopt(argv,"hl:u:s:r",["lower=","upper=","systemid","reduced"])
     except getopt.GetoptError as error:
         print(error)
         print(help_msg)
@@ -156,6 +158,12 @@ def main(argv):
             sysid = int(arg)
             sysid_range = False
             sysid_single = True
+        elif opt in ("-r", "--reduced"):
+            reduced_keyspace = True
+            sysid_single = False
+            sysid_range = False
+            sysid_lower = 1
+            sysid_upper = 16383
 
     if len(sys.argv) == 1:
         print('Invalid input, program accepts the following input format:\n' + help_msg)
@@ -163,18 +171,23 @@ def main(argv):
 
     if (sysid_lower or sysid_upper) and sysid:
         print('Invalid input, cannot accept range AND single System ID!')
-    if sysid_lower and sysid_upper:
+    if (sysid_lower and sysid_upper) and not reduced_keyspace:
         print('Generating System ID ' + str(sysid_lower) + ' through ' + str(sysid_upper))
         sysid_range = True
         sysid_single = False
     if not (sysid_lower and sysid_upper) and sysid:
         print('Sending single System ID ' + str(sysid))
         sysid_range = False
+    if (sysid_lower and sysid_upper) and reduced_keyspace:
+        print('Generating System ID ' + str(sysid_lower) + ' through ' + str(sysid_upper))
+        sysid_range = False
+        sysid_single = False
+
 
     if sysid_single:
         sysid = ValidateInput_sysid_single(sysid)
         #Generate packet hex
-        input_hex = PacketValues(sysid)
+        input_hex = PacketValues(sysid, 6)
         #Convert hex to binary ascii stream
         input_bin = hex_to_binary(input_hex)
         input_bin = input_bin[4:] #Removing extra null byte
@@ -184,7 +197,10 @@ def main(argv):
         d.setModeIDLE()
         #print('Configuring Radio...')
         ConfigureD(d)
-        TransmitData(output_bin, input_hex, d)
+        sync_frame = "000001"
+        data_frame = "001000000001001000" #value = 2
+        null_tail  = "000000"
+        TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail)
         time.sleep(0.01)
         d.setModeIDLE()
         print('Done!')
@@ -198,19 +214,51 @@ def main(argv):
         d.setModeIDLE()
         #print('Configuring Radio...')
         ConfigureD(d)
+        sync_frame = "000001"
+        data_frame = "001000000001001000" #value = 2
+        null_tail  = "000000"
         for i in range(sysid_lower, sysid_upper+1, 1):
             #Generate packet hex
-            input_hex = PacketValues(i)
+            input_hex = PacketValues(i, 6)
             #Convert hex to binary ascii stream
             input_bin = hex_to_binary(input_hex)
             input_bin = input_bin[4:] #Removing extra null byte
             output_bin = FormatBitFrame(input_bin)
-            TransmitData(output_bin, input_hex, d)
+            TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail)
             time.sleep(0.005)
         d.setModeIDLE()
         print('Done!')
         quit()
-    if not sysid_range or sysid_single:
+
+    if reduced_keyspace:
+        sysid_lower = ValidateInput_sysid_lower(sysid_lower, sysid_upper)
+        sysid_upper = ValidateInput_sysid_upper(sysid_lower, sysid_upper)
+        #print('Configuring RfCat...')
+        d = rflib.RfCat()
+        d.setModeIDLE()
+        #print('Configuring Radio...')
+        ConfigureD(d)
+        sync_frame = "000001 000001 001000 000001 001000"
+        data_frame = "001000 001000 001000 000001 001000" #value = 2
+        null_tail  = "000000"
+        rand_list = list(range(sysid_lower, sysid_upper+1, 1))
+        random.shuffle(rand_list)
+        for i in rand_list:
+            #Generate packet hex
+            input_hex = PacketValues(i, 6)
+            #Convert hex to binary ascii stream
+            input_bin = hex_to_binary(input_hex).lstrip("0")
+            #print(input_bin + ' ' + str(len(input_bin)))
+            input_bin = PadBytes(14, input_bin)
+            #print(input_bin + ' ' + str(len(input_bin)))
+            output_bin = FormatBitFrame(input_bin)
+            TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail)
+            time.sleep(0.005)
+        d.setModeIDLE()
+        print('Done!')
+        quit()
+
+    if not [sysid_range, sysid_single, reduced_keyspace]:
         print('Incomplete parameters specified!')
         print(help_msg)
 
