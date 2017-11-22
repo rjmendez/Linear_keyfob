@@ -114,7 +114,7 @@ def FormatBitFrame(input_bin):
             print("lolwut?")
     return output_bin
 
-def TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail):
+def TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, repeat_num):
     #sync_frame = "000001"
     #data_frame = "001000000001001000" #value = 2
     #null_tail  = "000000"
@@ -122,7 +122,7 @@ def TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail):
     keyLen = len(rf_data)
     #Transmit here.
     print('Sending packet payload: ' + input_hex + '2' + ' System ID: ' + str(int(input_hex, 16)))
-    d.RFxmit(rf_data)
+    d.RFxmit(rf_data, repeat=repeat_num)
     print('-'*40)
 
 
@@ -200,7 +200,7 @@ def main(argv):
         sync_frame = "000001"
         data_frame = "001000000001001000" #value = 2
         null_tail  = "000000"
-        TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail)
+        TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, 3)
         time.sleep(0.01)
         d.setModeIDLE()
         print('Done!')
@@ -224,7 +224,7 @@ def main(argv):
             input_bin = hex_to_binary(input_hex)
             input_bin = input_bin[4:] #Removing extra null byte
             output_bin = FormatBitFrame(input_bin)
-            TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail)
+            TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, 3)
             time.sleep(0.005)
         d.setModeIDLE()
         print('Done!')
@@ -252,7 +252,7 @@ def main(argv):
             input_bin = PadBytes(14, input_bin)
             #print(input_bin + ' ' + str(len(input_bin)))
             output_bin = FormatBitFrame(input_bin)
-            TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail)
+            TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, 3)
             time.sleep(0.005)
         d.setModeIDLE()
         print('Done!')
