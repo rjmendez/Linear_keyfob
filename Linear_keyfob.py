@@ -25,10 +25,10 @@ Documentation describes frame 0 as the sync frame, 1-20 as system code, and 21-2
 10101010001010100110 010
 AA2A6 2
 '''
-import binascii, bitstring, sys, getopt, rflib, time, random
+import binascii, bitstring, sys, getopt, rflib, time, random, re
 
 #Help
-help_msg = '\nLinear Technologies MegaCode RfCat transmitter.\n\nUse this to transmit a single remote ID or iterate through a range.\nIDs are 20 bits and are provided as an integer between 1 and 1048575.\n    -s, --systemid    <integer between 1-1048575>\n    -l, --lower       <lower end of range>\n    -u, --upper       <upper end of range>\n    -r, --reduced     Attempts to randomly guess a key in the reduced 14 bit keyspace based on research from King Kevin at www.cuvoodoo.info\n\n'
+help_msg = '\nLinear Technologies MegaCode RfCat transmitter and receiver.\n\nUse this to transmit a single remote ID or iterate through a range.\nYou can also listen for a defined period of time and display recorded IDs.\nIDs are 20 bits and are provided as an integer between 1 and 1048575.\n    -s, --systemid    <integer between 1-1048575>\n    -l, --lower       <lower end of range>\n    -u, --upper       <upper end of range>\n    -b, --bruteforce  Attempts to randomly guess a key in the reduced 14 bit keyspace based on research from King Kevin at www.cuvoodoo.info\n    -r, --record      <seconds> Listen for transmissions and return the IDs and data.\n\n'
 
 #Radio stuff
 frequency = 318000000
@@ -103,7 +103,7 @@ def byte_to_binary(n):
 def hex_to_binary(h):
     return ''.join(byte_to_binary(ord(b)) for b in binascii.unhexlify(h))
 
-def FormatBitFrame(input_bin):
+def FormatBitFrame_tx(input_bin):
     output_bin = ''
     for bit in input_bin:
         if bit == '0':
@@ -111,7 +111,20 @@ def FormatBitFrame(input_bin):
         elif bit == '1':
             output_bin += '000001'
         else:
-            print("lolwut?")
+            print("Failed to match bitstream while formatting!")
+    return output_bin
+
+def FormatBitFrame_rx(input_bin):
+    chunks, chunk_size = len(input_bin), len(input_bin)/24
+    chunks_list = [ input_bin[i:i+chunk_size] for i in range(0, chunks, chunk_size) ]
+    output_bin = ''
+    for c in chunks_list:
+        if c == '000001':
+            output_bin += '1'
+        elif c == '001000':
+            output_bin += '0'
+        else:
+            print("Failed to match bitstream while formatting!")
     return output_bin
 
 def TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, repeat_num):
@@ -125,6 +138,22 @@ def TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, re
     d.RFxmit(rf_data, repeat=repeat_num)
     print('-'*40)
 
+def Capture(d):
+    capture = ""
+    while (1):
+        try:
+            y, z = d.RFrecv()
+            capture = y.encode('hex')
+            print('Scanning...')
+            
+        except rflib.ChipconUsbTimeoutException: 
+            pass
+        if capture:
+            break
+    #Parse packets from the capture by reading tailing zeroes and sync frame zeroes of the next, one packet is always lost.
+    bin_capture = str(bin(int(capture, 16)))[2:]
+    payloads = re.split ('0'*14, bin_capture)
+    return payloads
 
 def main(argv):
     data = 1
@@ -134,12 +163,13 @@ def main(argv):
     sysid_upper = False
     sysid_range = False
     sysid_single = False
-    reduced_keyspace = False
+    record = False
+    bruteforce = False
     input_hex = ''
     output_hex = ''
     
     try:
-        opts, args = getopt.getopt(argv,"hl:u:s:r",["lower=","upper=","systemid","reduced"])
+        opts, args = getopt.getopt(argv,"hl:u:s:b:r:",["lower=","upper=","systemid","bruteforce","record"])
     except getopt.GetoptError as error:
         print(error)
         print(help_msg)
@@ -151,17 +181,27 @@ def main(argv):
         elif opt in ("-l", "--lower"):
             sysid_lower = int(arg)
             sysid_single = False
+            record = False
         elif opt in ("-u", "--upper"):
             sysid_upper = int(arg)
             sysid_single = False
+            record = False
         elif opt in ("-s", "--systemid"):
             sysid = int(arg)
             sysid_range = False
             sysid_single = True
-        elif opt in ("-r", "--reduced"):
-            reduced_keyspace = True
+            record = False
+        elif opt in ("-r", "--record"):
+            running = int(arg)
+            bruteforce = False
             sysid_single = False
             sysid_range = False
+            record = True
+        elif opt in ("-b", "--bruteforce"):
+            bruteforce = True
+            sysid_single = False
+            sysid_range = False
+            record = False
             sysid_lower = 1
             sysid_upper = 16383
 
@@ -171,14 +211,14 @@ def main(argv):
 
     if (sysid_lower or sysid_upper) and sysid:
         print('Invalid input, cannot accept range AND single System ID!')
-    if (sysid_lower and sysid_upper) and not reduced_keyspace:
+    if (sysid_lower and sysid_upper) and not bruteforce:
         print('Generating System ID ' + str(sysid_lower) + ' through ' + str(sysid_upper))
         sysid_range = True
         sysid_single = False
     if not (sysid_lower and sysid_upper) and sysid:
         print('Sending single System ID ' + str(sysid))
         sysid_range = False
-    if (sysid_lower and sysid_upper) and reduced_keyspace:
+    if (sysid_lower and sysid_upper) and bruteforce:
         print('Generating System ID ' + str(sysid_lower) + ' through ' + str(sysid_upper))
         sysid_range = False
         sysid_single = False
@@ -191,7 +231,7 @@ def main(argv):
         #Convert hex to binary ascii stream
         input_bin = hex_to_binary(input_hex)
         input_bin = input_bin[4:] #Removing extra null byte
-        output_bin = FormatBitFrame(input_bin)
+        output_bin = FormatBitFrame_tx(input_bin)
         #print('Configuring RfCat...')
         d = rflib.RfCat()
         d.setModeIDLE()
@@ -223,14 +263,14 @@ def main(argv):
             #Convert hex to binary ascii stream
             input_bin = hex_to_binary(input_hex)
             input_bin = input_bin[4:] #Removing extra null byte
-            output_bin = FormatBitFrame(input_bin)
+            output_bin = FormatBitFrame_tx(input_bin)
             TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, 3)
             time.sleep(0.005)
         d.setModeIDLE()
         print('Done!')
         quit()
 
-    if reduced_keyspace:
+    if bruteforce:
         sysid_lower = ValidateInput_sysid_lower(sysid_lower, sysid_upper)
         sysid_upper = ValidateInput_sysid_upper(sysid_lower, sysid_upper)
         #print('Configuring RfCat...')
@@ -251,14 +291,44 @@ def main(argv):
             #print(input_bin + ' ' + str(len(input_bin)))
             input_bin = PadBytes(14, input_bin)
             #print(input_bin + ' ' + str(len(input_bin)))
-            output_bin = FormatBitFrame(input_bin)
+            output_bin = FormatBitFrame_tx(input_bin)
             TransmitData(output_bin, input_hex, d, sync_frame, data_frame, null_tail, 3)
             time.sleep(0.005)
         d.setModeIDLE()
         print('Done!')
         quit()
 
-    if not [sysid_range, sysid_single, reduced_keyspace]:
+    if record:
+        rxlist = []
+        #print('Configuring RfCat...')
+        d = rflib.RfCat()
+        #d.setModeIDLE()
+        #print('Configuring Radio...')
+        ConfigureD(d)
+        while running > 0:
+            running = running-1
+            print(str(running) + ' Seconds remaining')
+            for payload in Capture(d):
+                if '1001000' in payload[:7] and (len(payload) == 136) and (len(payload) % 2 == 0):
+                    binary = "00000"+payload+"000000000"
+                    if len(binary) == 150:
+                        Linear_packet = []
+                        Linear_packet_raw = FormatBitFrame_rx(binary)
+                        print("\nLinear Packet: " + Linear_packet_raw)
+                        Linear_packet_systemid_rx = str(int(Linear_packet_raw[1:len(Linear_packet_raw)-3], 2))
+                        print("System ID: " + Linear_packet_systemid_rx)
+                        Linear_packet_data = str(int(Linear_packet_raw[len(Linear_packet_raw)-3:], 2))
+                        print("Data: " + str(int(Linear_packet_raw[len(Linear_packet_raw)-3:], 2)))
+                        Linear_packet += binary, Linear_packet_raw, Linear_packet_systemid_rx, Linear_packet_data
+                        rxlist += Linear_packet
+                else:
+                    continue
+        for pkt in rxlist:
+            print(pkt)
+        d.setModeIDLE()
+        print('Done!')
+
+    if not [sysid_range, sysid_single, record, bruteforce]:
         print('Incomplete parameters specified!')
         print(help_msg)
 
