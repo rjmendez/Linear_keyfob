@@ -31,7 +31,7 @@ import binascii, bitstring, sys, getopt, rflib, time, random, re
 help_msg = '\nLinear Technologies MegaCode RfCat transmitter and receiver.\n\nUse this to transmit a single remote ID or iterate through a range.\nYou can also listen for a defined period of time and display recorded IDs.\nIDs are 20 bits and are provided as an integer between 1 and 1048575.\n    -s, --systemid    <integer between 1-1048575>\n    -l, --lower       <lower end of range>\n    -u, --upper       <upper end of range>\n    -b, --bruteforce  Attempts to randomly guess a key in the reduced 14 bit keyspace based on research from King Kevin at www.cuvoodoo.info\n    -r, --record      <seconds> Listen for transmissions and return the IDs and data.\n\n'
 
 #Radio stuff
-frequency = 318000000
+frequency = 318010000
 baudRate = 1000
 keyLen = 0
 
@@ -309,7 +309,7 @@ def main(argv):
             running = running-1
             print(str(running) + ' Seconds remaining')
             for payload in Capture(d):
-                if '1001000' in payload[:7] and (len(payload) == 136) and (len(payload) % 2 == 0):
+                if '1' in payload[:1] and (len(payload) == 136) and (len(payload) % 2 == 0):
                     binary = "00000"+payload+"000000000"
                     if len(binary) == 150:
                         Linear_packet = []
