@@ -25,7 +25,7 @@ Documentation describes frame 0 as the sync frame, 1-20 as system code, and 21-2
 10101010001010100110 010
 AA2A6 2
 '''
-import binascii, bitstring, sys, getopt, rflib, time, random, re
+import binascii, bitstring, sys, getopt, rflib, time, random, re, datetime
 
 #Help
 help_msg = '\nLinear Technologies MegaCode RfCat transmitter and receiver.\n\nUse this to transmit a single remote ID or iterate through a range.\nYou can also listen for a defined period of time and display recorded IDs.\nIDs are 20 bits and are provided as an integer between 1 and 1048575.\n    -s, --systemid    <integer between 1-1048575>\n    -l, --lower       <lower end of range>\n    -u, --upper       <upper end of range>\n    -b, --bruteforce  Attempts to randomly guess a key in the reduced 14 bit keyspace based on research from King Kevin at www.cuvoodoo.info\n    -r, --record      <seconds> Listen for transmissions and return the IDs and data.\n\n'
@@ -123,6 +123,9 @@ def FormatBitFrame_rx(input_bin):
             output_bin += '1'
         elif c == '001000':
             output_bin += '0'
+        #End of packet is marked by 6ms of no pulses.
+        elif c == '000000':
+            print('Detected new packet!')
         else:
             print("Failed to match bitstream while formatting!")
     return output_bin
@@ -300,6 +303,11 @@ def main(argv):
 
     if record:
         rxlist = []
+        now = datetime.datetime.now()
+        logfile = 'linear_' + str(now.isoformat()).replace(':','_') + '.log'
+        print('Saving packet data to ' + logfile)
+        log = open(logfile, 'w')
+        log.write('Linear Packet Log\n')
         #print('Configuring RfCat...')
         d = rflib.RfCat()
         #d.setModeIDLE()
@@ -312,19 +320,25 @@ def main(argv):
                 if '1' in payload[:1] and (len(payload) == 136) and (len(payload) % 2 == 0):
                     binary = "00000"+payload+"000000000"
                     if len(binary) == 150:
+                        log = open(logfile, 'a')
+                        now = datetime.datetime.now()
                         Linear_packet = []
                         Linear_packet_raw = FormatBitFrame_rx(binary)
-                        print("\nLinear Packet: " + Linear_packet_raw)
+                        log.write('-'*25 + '\n' + str(now.isoformat()) + '\nLinear Packet: ' + Linear_packet_raw)
+                        print('-'*25 + '\n' + str(now.isoformat()) + '\nLinear Packet: ' + Linear_packet_raw)
                         Linear_packet_systemid_rx = str(int(Linear_packet_raw[1:len(Linear_packet_raw)-3], 2))
-                        print("System ID: " + Linear_packet_systemid_rx)
+                        log.write('\nSystem ID: ' + Linear_packet_systemid_rx)
+                        print('System ID: ' + Linear_packet_systemid_rx)
                         Linear_packet_data = str(int(Linear_packet_raw[len(Linear_packet_raw)-3:], 2))
-                        print("Data: " + str(int(Linear_packet_raw[len(Linear_packet_raw)-3:], 2)))
+                        log.write('\nData: ' + Linear_packet_data + '\n')
+                        print('Data: ' + Linear_packet_data + '\n')
+                        log.close()
                         Linear_packet += binary, Linear_packet_raw, Linear_packet_systemid_rx, Linear_packet_data
                         rxlist += Linear_packet
                 else:
                     continue
-        for pkt in rxlist:
-            print(pkt)
+        #for pkt in rxlist:
+        #    print(pkt)
         d.setModeIDLE()
         print('Done!')
 
